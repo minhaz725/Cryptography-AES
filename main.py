@@ -79,6 +79,19 @@ def gethexara(text):
         w.append(v[x:x + 4][:])
     return w
 
+def gettext(hex):
+    v = []
+
+    for x in hex:
+        i = 0
+        while i<4:
+            v.append(int(x[i],16))
+            i += 1
+    t = ''.join(map(chr,v))
+    #print(str(t))
+
+    return t
+
 
 def xor(y,r):
     i=0
@@ -124,13 +137,23 @@ def gen_rkey(w):
             roundkeys.append(w[i - 2])
             roundkeys.append(w[i - 1])
             roundkeys.append(w[i])
-            print("round", ((i + 1) / 4) - 1, "key", roundkeys[i - 7], roundkeys[i - 6], roundkeys[i - 5], roundkeys[i - 4])
+            #print("round", ((i + 1) / 4) - 1, "key", roundkeys[i - 7], roundkeys[i - 6], roundkeys[i - 5], roundkeys[i - 4])
         i += 1
     return roundkeys
 
 def addrkey(p,round,w,rkeys):
     if round==0 : r = [w[0+4*round], w[1+4*round], w[2+4*round], w[3+4*round]]
     else: r = [rkeys[round*4-4],rkeys[round*4-3], rkeys[round*4-2], rkeys[round*4-1]]
+    #print(r)
+    i = 0
+    z = []
+    while i < len(r):
+        z.append(xor(p[i], r[i]))
+        i += 1
+    return z
+def dc_addrkey(p,round,w,rkeys):
+    if round==10 : r = [w[44-4-4*round], w[44-3-4*round], w[44-2-4*round], w[44-1-4*round]]
+    else: r = [rkeys[44-round*4-8],rkeys[44-round*4-7], rkeys[44-round*4-6], rkeys[44-round*4-5]]
     #print(r)
     i = 0
     z = []
@@ -163,6 +186,16 @@ def substut_bytes(p):
             j += 1
         i += 1
     return p
+def inv_substut_bytes(p):
+    i = 0
+    while i < 4:
+        j=0
+        while j < 4:
+            p[i][j] = format(InvSbox[int(p[i][j], 16)], "x")
+            j += 1
+        i += 1
+    return p
+
 
 def shift_row(p):
 
@@ -176,6 +209,20 @@ def shift_row(p):
     transpos(p)
     return p
 
+
+def inv_shift_row(p):
+
+    i = 0
+    transpos(p)
+    while i < 4:
+        g = collections.deque(p[i])
+        g.rotate(i)
+        p[i] = list(g)
+        i += 1
+    transpos(p)
+    return p
+
+
 def mul(x, y):
     bsum = BitVector(intVal=0, size=8)
     #print(x)
@@ -186,8 +233,9 @@ def mul(x, y):
         bv2 = BitVector(intVal=int(y[idx], 16), size=8)
         #print(type(bv2))
         bmul = bv1.gf_multiply_modular(bv2, AES_modulus, 8)
-        bsum = bsum ^bmul
+        bsum = bsum ^ bmul
     return bsum.get_bitvector_in_hex()
+
 
 def mix_col(mix,state):
     i = 0
@@ -205,24 +253,52 @@ def mix_col(mix,state):
     transpos(p)
     return p
 
+def inv_mix_col(mix,state):
+    i = 0
+    p = []
+    #print(mix)
+    #print(state)
+    #transpos(state)
+    while i < 4:
+        j = 0
+        q = []
+        while j < 4:
+            q.append(mul(mix[i],state[j]))
+            j += 1
+        p.append(q)
+        i += 1
+    transpos(p)
+    return p
+
 
 def encrypt(key,val):
     s = key
     t = val
+    #print(len(s))
+    pad = 16 - len(s)
+    while pad > 0:
+        s=s + " "
+        pad -= 1
+    pad = 16 - len(t)
+    while pad > 0:
+        t=t + " "
+        pad -= 1
+    #print(len(s))
     w = gethexara(s[:])
     print(w)
 
     rkeys = gen_rkey(w)
 
     m = gethexara(t[:])
+    print(m)
     rnd = 0
     while rnd < 11:
         if rnd==0 :
             #print("state matrix", m)
 
             m = addrkey(m, rnd, w, rkeys)
-            print("AES after r",rnd, m)
-            print("")
+            #print("AES after r",rnd, m)
+            #print("")
         elif rnd==10:
             #print("state matrix", m)
             #print(rnd)
@@ -247,20 +323,88 @@ def encrypt(key,val):
             m = mix_col(Mixer, m)
             #print("mixed col/ state mat of round 1", m)
             m = addrkey(m, rnd, w, rkeys)
-            print("AES after round",rnd," ", m)
-            print("")
+            #print("AES after round",rnd," ", m)
+            #print("")
         rnd +=1
     return m
 
 
-key = "Thats my Kung Fu"
-val = "Two One Nine Two"
-print(key)
+def decrypt(cypher):
+    s = key
+    pad = 16 - len(s)
+    while pad > 0:
+        s= s+ " "
+        pad -= 1
 
+
+    w = gethexara(s[:])
+    rkeys = gen_rkey(w)
+    t = val
+    m = gethexara(t[:])
+    #print(m)
+    m = cypher
+
+
+    rnd = 0
+    while rnd < 11:
+        if rnd==0 :
+            #print("state matrix", m)
+
+            m = dc_addrkey(m, rnd, w, rkeys)
+            #print("Inv AES after r",rnd, m)
+            #print("")
+        elif rnd==10:
+            #print("state matrix", m)
+            #print(rnd)
+
+            inv_shift_row(m)
+            # print("shift row", m)
+
+            inv_substut_bytes(m)
+            #print("subs", m)
+
+            m = dc_addrkey(m, rnd, w, rkeys)
+            print("Inv AES after round", rnd, " ", m)
+            #print("")
+
+        else:
+            #print("state matrix", m)
+            #print(rnd)
+
+            inv_shift_row(m)
+            # print("shift row", m)
+
+            inv_substut_bytes(m)
+            #print("subs", m)
+
+            m = dc_addrkey(m, rnd, w, rkeys)
+            #print("Inv AES after round",rnd," ", m)
+
+            m = inv_mix_col(InvMixer, m)
+            #print("inv mixed col/ state mat of round",rnd, m)
+
+            #print("")
+        rnd +=1
+    return m
+
+
+
+
+
+
+
+key = "BUET CSE16 Batch"
+val = "WillGraduateSoon"
+print(key)
+print(val)
 cypher= encrypt(key,val)
 
 
-print(cypher)
+print(gettext(cypher))
+
+texthex = decrypt(cypher)
+text = gettext(texthex)
+print(text)
 
 
 
